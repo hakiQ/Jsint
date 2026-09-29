@@ -1,0 +1,187 @@
+name: jsint-prod
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: jsint-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jsint}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jsint}
+      POSTGRES_DB: ${POSTGRES_DB:-jsint}
+    ports:
+      # Bound to localhost: host-only debugging access, never exposed to the network.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pg_data_prod:/var/lib/postgresql/data
+    networks:
+      - jsint_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jsint}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: jsint-redis-prod
+    restart: always
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - jsint_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  neo4j:
+    image: neo4j:5
+    container_name: jsint-neo4j-prod
+    restart: always
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    environment:
+      - NEO4J_AUTH=${NEO4J_USERNAME}/${NEO4J_PASSWORD}
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_import_file_use__neo4j__config=true
+    volumes:
+      - neo4j_data_prod:/data
+      - neo4j_logs_prod:/logs
+      - neo4j_import_prod:/var/lib/neo4j/import
+      - neo4j_plugins_prod:/plugins
+    networks:
+      - jsint_network
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u ${NEO4J_USERNAME} -p ${NEO4J_PASSWORD} \"RETURN 1\""]
+      interval: 10s
+      timeout: 20s
+      retries: 10
+      start_period: 30s
+
+  api:
+    image: jsint-api:${JSINT_VERSION:-local}
+    # Never reach for a registry: this tag only ever exists as a local build.
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: jsint-api/Dockerfile
+      target: production
+    container_name: jsint-api-prod
+    restart: always
+    ports:
+      # The frontend's nginx proxies /api/ to this service over the Docker
+      # network — direct access is host-only, for debugging.
+      - "127.0.0.1:5001:5001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-jsint}:${POSTGRES_PASSWORD:-jsint}@postgres:5432/${POSTGRES_DB:-jsint}
+      - NEO4J_URI_BOLT=bolt://neo4j:7687
+      - NEO4J_USERNAME=${NEO4J_USERNAME}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - AUTH_SECRET=${AUTH_SECRET}
+      - MASTER_VAULT_KEY_V1=${MASTER_VAULT_KEY_V1}
+      - ADMIN_EMAILS=${ADMIN_EMAILS:-}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - jsint_network
+
+  celery:
+    # Same image as the API service: built once by `api`, reused here.
+    image: jsint-api:${JSINT_VERSION:-local}
+    pull_policy: never
+    container_name: jsint-celery-prod
+    restart: always
+    command:
+      [
+        "celery",
+        "-A",
+        "jsint_core.core.celery",
+        "worker",
+        "--loglevel=info",
+        "--pool=threads",
+        "--concurrency=10",
+      ]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-jsint}:${POSTGRES_PASSWORD:-jsint}@postgres:5432/${POSTGRES_DB:-jsint}
+      - NEO4J_URI_BOLT=bolt://neo4j:7687
+      - NEO4J_USERNAME=${NEO4J_USERNAME}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - MASTER_VAULT_KEY_V1=${MASTER_VAULT_KEY_V1}
+      - REDIS_URL=redis://redis:6379/0
+      - SKIP_MIGRATIONS=true
+      - AUTH_SECRET=${AUTH_SECRET}
+    healthcheck:
+      # Celery has no HTTP server — Dockerfile's curl-based healthcheck always fails.
+      # Use celery's own ping primitive instead.
+      test: ["CMD-SHELL", "celery -A jsint_core.core.celery inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - jsint_network
+
+  app:
+    # Frontend bundle uses same-origin relative URLs; nginx inside the image
+    # proxies /api/ to the "api" service. No VITE_API_URL needed.
+    image: jsint-app:${JSINT_VERSION:-local}
+    pull_policy: build
+    build:
+      context: ./jsint-app
+      dockerfile: Dockerfile
+      args:
+        VITE_REPO_URL: ${VITE_REPO_URL:-}
+    container_name: jsint-app-prod
+    restart: always
+    ports:
+      # The only network-facing port. Serves the UI and proxies /api/ to the API.
+      - "5173:8080"
+    volumes:
+      # Override the baked-in nginx.conf to use system resolver (Podman-compatible).
+      - ./jsint-app/nginx.conf:/etc/nginx/nginx.conf:ro,Z
+    networks:
+      - jsint_network
+    depends_on:
+      api:
+        condition: service_healthy
+
+networks:
+  jsint_network:
+    name: jsint_network_prod
+    driver: bridge
+
+volumes:
+  pg_data_prod:
+  neo4j_data_prod:
+  neo4j_logs_prod:
+  neo4j_import_prod:
+  neo4j_plugins_prod:

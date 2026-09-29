@@ -1,0 +1,50 @@
+{
+  "name": "jsint",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "description": "Graph analysis and intelligence platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare": "husky",
+    "commit": "cz",
+    "release": "standard-version",
+    "release:minor": "standard-version --release-as minor",
+    "release:major": "standard-version --release-as major",
+    "release:patch": "standard-version --release-as patch",
+    "release:first": "standard-version --first-release",
+    "sync-version": "node scripts/sync-versions.js",
+    "migrate": "node scripts/migrate.js",
+    "migrate:dry-run": "node scripts/migrate.js --dry-run"
+  },
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-conventional-changelog"
+    }
+  },
+  "lint-staged": {
+    "**/*.py": [
+      "uv run ruff format",
+      "uv run ruff check --fix"
+    ],
+    "jsint-app/**/*.{ts,tsx,js,jsx}": [
+      "prettier --write"
+    ]
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "neo4j-driver": "^5.27.0"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.1.0",
+    "@commitlint/config-conventional": "^20.0.0",
+    "commitizen": "^4.3.1",
+    "cz-conventional-changelog": "^3.3.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
+    "standard-version": "^9.5.0"
+  },
+  "workspaces": [
+    "jsint-app"
+  ]
+}

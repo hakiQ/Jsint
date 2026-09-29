@@ -1,0 +1,84 @@
+name: jsint
+
+services:
+  # PostgreSQL database
+  postgres:
+    image: postgres:15
+    container_name: jsint-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: jsint
+      POSTGRES_PASSWORD: jsint
+      POSTGRES_DB: jsint
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - jsint_network
+      
+  # Redis for Celery & cache
+  redis:
+    image: redis:alpine
+    container_name: redis-cache
+    ports:
+      - "6379:6379"
+    networks:
+      - jsint_network
+
+  # Neo4j graph database
+  neo4j:
+    image: neo4j:5
+    container_name: jsint-neo4j
+    ports:
+      - "7474:7474"  # Web UI
+      - "7687:7687"  # Bolt
+    environment:
+      - NEO4J_AUTH=${NEO4J_USERNAME}/${NEO4J_PASSWORD}
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_import_file_use__neo4j__config=true
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+    healthcheck:
+      test: cypher-shell -u ${NEO4J_USERNAME} -p ${NEO4J_PASSWORD} "RETURN 1"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - jsint_network
+
+  app:
+    build:
+      context: ./jsint-app
+      dockerfile: Dockerfile.dev
+    container_name: jsint-app
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./jsint-app:/app
+      - app_node_modules:/app/node_modules
+    environment:
+      - VITE_API_URL=${VITE_API_URL}
+    networks:
+      - jsint_network
+    stdin_open: true
+    tty: true
+
+networks:
+  jsint_network:
+    name: jsint_network
+    driver: bridge
+
+volumes:
+  pg_data:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_import:
+  neo4j_plugins:
+  app_node_modules:

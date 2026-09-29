@@ -1,0 +1,42 @@
+import ipaddress
+from typing import Self
+
+from pydantic import Field, IPvAnyNetwork, model_validator
+
+from .jsint_base import JsintType
+from .registry import jsint_type
+
+
+@jsint_type
+class CIDR(JsintType):
+    """Represents a CIDR (Classless Inter-Domain Routing) network block."""
+
+    network: IPvAnyNetwork = Field(
+        ...,
+        description="CIDR block (e.g., 8.8.8.0/24)",
+        title="Network Block",
+        json_schema_extra={"primary": True},
+    )
+
+    @model_validator(mode="after")
+    def compute_label(self) -> Self:
+        self.nodeLabel = str(self.network)
+        return self
+
+    @classmethod
+    def from_string(cls, line: str):
+        """Parse a CIDR from a raw string."""
+        return cls(network=line.strip())
+
+    @classmethod
+    def detect(cls, line: str) -> bool:
+        """Detect if a line of text contains a CIDR block."""
+        line = line.strip()
+        if not line or "/" not in line:
+            return False
+
+        try:
+            ipaddress.ip_network(line, strict=False)
+            return True
+        except ValueError:
+            return False

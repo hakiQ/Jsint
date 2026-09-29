@@ -1,0 +1,133 @@
+import os
+from typing import Any, Dict, List, Optional
+
+from tools.network.asnmap import AsnmapTool
+
+from jsint_core.core.enricher_base import Enricher
+from jsint_core.core.logger import Logger
+from jsint_enrichers.registry import jsint_enricher
+from jsint_types.asn import ASN
+from jsint_types.ip import Ip
+
+
+@jsint_enricher
+class IpToAsnEnricher(Enricher):
+    """[ASNMAP] Takes an IP address and returns its corresponding ASN."""
+
+    # Define types as class attributes - base class handles schema generation automatically
+    InputType = Ip
+    OutputType = ASN
+
+    def __init__(
+        self,
+        sketch_id: Optional[str] = None,
+        scan_id: Optional[str] = None,
+        vault=None,
+        params: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(
+            sketch_id=sketch_id,
+            scan_id=scan_id,
+            params_schema=self.get_params_schema(),
+            vault=vault,
+            params=params,
+        )
+        self.ip_asn_mapping: List[tuple[Ip, ASN]] = []
+
+    @classmethod
+    def required_params(cls) -> bool:
+        return True
+
+    @classmethod
+    def get_params_schema(cls) -> List[Dict[str, Any]]:
+        """Declare required parameters for this enricher"""
+        return [
+            {
+                "name": "PDCP_API_KEY",
+                "type": "vaultSecret",
+                "description": "The ProjectDiscovery Cloud Platform API key for asnmap.",
+                "required": True,
+            },
+        ]
+
+    @classmethod
+    def name(cls) -> str:
+        return "ip_to_asn"
+
+    @classmethod
+    def category(cls) -> str:
+        return "Ip"
+
+    @classmethod
+    def key(cls) -> str:
+        return "address"
+
+    async def scan(self, data: List[InputType]) -> List[OutputType]:
+        results: List[OutputType] = []
+        self.ip_asn_mapping = []
+        asnmap = AsnmapTool()
+
+        # Retrieve API key from vault or environment
+        api_key = self.get_secret("PDCP_API_KEY", os.getenv("PDCP_API_KEY"))
+
+        for ip in data:
+            try:
+                # Use asnmap tool to get ASN info, passing the API key
+                asn_data = asnmap.launch(ip.address, type="ip", api_key=api_key)
+                if asn_data and "as_number" in asn_data:
+                    # Parse ASN number from string like "AS16276" to integer 16276
+                    asn_string = asn_data["as_number"]
+                    asn_number = int(asn_string.replace("AS", "").replace("as", ""))
+                    # Create ASN object with correct field mapping
+                    asn = ASN(
+                        number=asn_number,
+                        name=asn_data.get("as_name", ""),
+                        country=asn_data.get("as_country", ""),
+                        description=asn_data.get("as_name", ""),
+                    )
+                    results.append(asn)
+                    self.ip_asn_mapping.append((ip, asn))
+                    Logger.info(
+                        self.sketch_id,
+                        {
+                            "message": f"[ASNMAP] Found AS{asn.number} ({asn.name}) for IP {ip.address}"
+                        },
+                    )
+                else:
+                    Logger.warn(
+                        self.sketch_id,
+                        {
+                            "message": f"[ASNMAP] No ASN data or missing 'as_number' field for IP {ip.address}. Data keys: {list(asn_data.keys()) if asn_data else 'None'}"
+                        },
+                    )
+            except Exception as e:
+                Logger.error(
+                    self.sketch_id,
+                    {"message": f"Error getting ASN for IP {ip.address}: {e}"},
+                )
+                continue
+
+        return results
+
+    def postprocess(
+        self, results: List[OutputType], input_data: List[InputType] = None
+    ) -> List[OutputType]:
+        # Create Neo4j relationships between IPs and their corresponding ASNs
+        if self._graph_service:
+            for ip, asn in self.ip_asn_mapping:
+                # Create IP node
+                self.create_node(ip)
+                # Create ASN node
+                self.create_node(asn)
+                # Create relationship
+                self.create_relationship(ip, asn, "BELONGS_TO")
+                self.log_graph_message(
+                    f"IP {ip.address} belongs to AS{asn.number} ({asn.name})"
+                )
+
+        return results
+
+
+# Make types available at module level for easy access
+InputType = IpToAsnEnricher.InputType
+OutputType = IpToAsnEnricher.OutputType

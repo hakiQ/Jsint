@@ -1,0 +1,85 @@
+from typing import List, Optional, Self
+
+from pydantic import Field, model_validator
+
+from .jsint_base import JsintType
+from .registry import jsint_type
+
+
+@jsint_type
+class WebTracker(JsintType):
+    """Represents a web tracking technology with privacy and compliance information."""
+
+    tracker_id: str = Field(
+        ...,
+        description="Unique tracker identifier",
+        title="Tracker ID",
+        json_schema_extra={"primary": True},
+    )
+    name: Optional[str] = Field(None, description="Tracker name", title="Name")
+    type: Optional[str] = Field(
+        None, description="Type of tracker (analytics, advertising, etc.)", title="Type"
+    )
+    domain: Optional[str] = Field(
+        None, description="Domain where tracker is deployed", title="Domain"
+    )
+    script_url: Optional[str] = Field(
+        None, description="URL of tracking script", title="Script URL"
+    )
+    company: Optional[str] = Field(
+        None, description="Company providing the tracker", title="Company"
+    )
+    purpose: Optional[str] = Field(
+        None, description="Purpose of tracking", title="Purpose"
+    )
+    data_collected: Optional[List[str]] = Field(
+        None, description="Types of data collected", title="Data Collected"
+    )
+    privacy_policy: Optional[str] = Field(
+        None, description="Privacy policy URL", title="Privacy Policy"
+    )
+    opt_out_url: Optional[str] = Field(
+        None, description="Opt-out URL", title="Opt-out URL"
+    )
+    first_seen: Optional[str] = Field(
+        None, description="First time tracker was observed", title="First Seen"
+    )
+    last_seen: Optional[str] = Field(
+        None, description="Last time tracker was observed", title="Last Seen"
+    )
+    is_active: Optional[bool] = Field(
+        None, description="Whether tracker is currently active", title="Is Active"
+    )
+    is_third_party: Optional[bool] = Field(
+        None, description="Whether tracker is third-party", title="Is Third Party"
+    )
+    cookie_duration: Optional[int] = Field(
+        None, description="Cookie duration in days", title="Cookie Duration"
+    )
+    gdpr_compliant: Optional[bool] = Field(
+        None, description="Whether tracker is GDPR compliant", title="GDPR Compliant"
+    )
+    source: Optional[str] = Field(
+        None, description="Source of tracker information", title="Source"
+    )
+    risk_level: Optional[str] = Field(
+        None, description="Privacy risk level", title="Risk Level"
+    )
+
+    @model_validator(mode="after")
+    def compute_label(self) -> Self:
+        if self.name:
+            self.nodeLabel = f"{self.name}-{self.tracker_id}"
+        else:
+            self.nodeLabel = self.tracker_id
+        return self
+
+    @classmethod
+    def from_string(cls, line: str):
+        """Parse a web tracker from a raw string."""
+        return cls(tracker_id=line.strip())
+
+    @classmethod
+    def detect(cls, line: str) -> bool:
+        """WebTracker cannot be reliably detected from a single line of text."""
+        return False

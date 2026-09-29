@@ -1,0 +1,100 @@
+import re
+from typing import Optional, Self
+from urllib.parse import urlparse
+
+from pydantic import Field, field_validator, model_validator
+
+from .jsint_base import JsintType
+from .registry import jsint_type
+
+
+@jsint_type
+class Domain(JsintType):
+    """Represents a domain name and its properties."""
+
+    domain: str = Field(
+        ...,
+        description="Domain name",
+        title="Domain name",
+        json_schema_extra={"primary": True},
+    )
+    root: Optional[bool] = Field(
+        True, description="Is root or not", title="Is Root Domain"
+    )
+
+    @field_validator("domain")
+    @classmethod
+    def validate_domain(cls, v: str) -> str:
+        try:
+            parsed = urlparse(v if "://" in v else "http://" + v)
+            hostname = parsed.hostname or v
+            if not hostname or "." not in hostname:
+                raise ValueError
+            if not re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", hostname):
+                raise ValueError
+            return hostname
+        except Exception:
+            raise ValueError(f"Invalid domain: {v}")
+
+    @model_validator(mode="after")
+    def check_root(self) -> Self:
+        self.root = is_root_domain(self.domain)
+        return self
+
+    @model_validator(mode="after")
+    def compute_label(self) -> Self:
+        self.nodeLabel = self.domain
+        return self
+
+    @classmethod
+    def from_string(cls, line: str):
+        """Parse a domain from a raw string."""
+        return cls(domain=line.strip())
+
+    @classmethod
+    def detect(cls, line: str) -> bool:
+        """Detect if a line of text contains a domain."""
+        line = line.strip()
+        if not line or len(line) > 253:  # Max domain length
+            return False
+
+        # Basic domain pattern: alphanumeric + hyphens, dots, and must have TLD
+        domain_pattern = (
+            r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+        )
+        if not re.match(domain_pattern, line):
+            return False
+
+        # Additional validation: not too many consecutive dots, no leading/trailing dots
+        if ".." in line or line.startswith(".") or line.endswith("."):
+            return False
+
+        return True
+
+
+def is_root_domain(domain: str) -> bool:
+    try:
+        if "://" in domain:
+            parsed = urlparse(domain)
+            domain = parsed.hostname or domain
+        parts = domain.split(".")
+        common_cc_tlds = [
+            ".co.uk",
+            ".com.au",
+            ".org.uk",
+            ".net.uk",
+            ".gov.uk",
+            ".ac.uk",
+            ".co.nz",
+            ".com.sg",
+            ".co.jp",
+            ".co.kr",
+            ".com.br",
+            ".com.mx",
+        ]
+        for cc_tld in common_cc_tlds:
+            if domain.endswith(cc_tld):
+                return len(parts) == 3
+        return len(parts) == 2
+    except Exception:
+        return False

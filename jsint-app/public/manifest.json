@@ -1,0 +1,12 @@
+{
+  "name": "Jsint",
+  "short_name": "Jsint",
+  "description": "Graph based investigation manager.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#6855d6",
+  "icons": [
+    { "src": "/jsint.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

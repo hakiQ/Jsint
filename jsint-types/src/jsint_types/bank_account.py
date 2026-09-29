@@ -1,0 +1,94 @@
+from typing import List, Optional, Self
+
+from pydantic import Field, model_validator
+
+from .jsint_base import JsintType
+from .registry import jsint_type
+
+
+@jsint_type
+class BankAccount(JsintType):
+    """Represents a bank account with financial and security information."""
+
+    account_number: str = Field(
+        ...,
+        description="Bank account number",
+        title="Account Number",
+        json_schema_extra={"primary": True},
+    )
+    bank_name: Optional[str] = Field(None, description="Bank name", title="Bank Name")
+    account_type: Optional[str] = Field(
+        None,
+        description="Type of account (checking, savings, etc.)",
+        title="Account Type",
+    )
+    routing_number: Optional[str] = Field(
+        None, description="Bank routing number", title="Routing Number"
+    )
+    iban: Optional[str] = Field(
+        None, description="International Bank Account Number", title="IBAN"
+    )
+    swift_code: Optional[str] = Field(
+        None, description="SWIFT/BIC code", title="SWIFT Code"
+    )
+    country: Optional[str] = Field(
+        None, description="Country where account is held", title="Country"
+    )
+    currency: Optional[str] = Field(
+        None, description="Account currency", title="Currency"
+    )
+    balance: Optional[float] = Field(
+        None, description="Account balance", title="Balance"
+    )
+    account_holder: Optional[str] = Field(
+        None, description="Account holder name", title="Account Holder"
+    )
+    status: Optional[str] = Field(
+        None, description="Account status (active, closed, etc.)", title="Status"
+    )
+    opened_date: Optional[str] = Field(
+        None, description="Account opening date", title="Opened Date"
+    )
+    closed_date: Optional[str] = Field(
+        None, description="Account closing date", title="Closed Date"
+    )
+    is_joint: Optional[bool] = Field(
+        None, description="Whether account is joint", title="Is Joint"
+    )
+    associated_individuals: Optional[List[str]] = Field(
+        None,
+        description="Individuals associated with account",
+        title="Associated Individuals",
+    )
+    source: Optional[str] = Field(
+        None, description="Source of account information", title="Source"
+    )
+    is_compromised: Optional[bool] = Field(
+        None, description="Whether account has been compromised", title="Is Compromised"
+    )
+    breach_source: Optional[str] = Field(
+        None, description="Source of breach if compromised", title="Breach Source"
+    )
+
+    @model_validator(mode="after")
+    def compute_label(self) -> Self:
+        parts = []
+        if self.bank_name:
+            parts.append(self.bank_name)
+        parts.append(
+            f"****{self.account_number[-4:]}"
+            if len(self.account_number) > 4
+            else self.account_number
+        )
+        self.nodeLabel = " - ".join(parts)
+        return self
+
+    @classmethod
+    def from_string(cls, line: str):
+        """Parse a bank account from a raw string."""
+        return cls(account_number=line.strip())
+
+    @classmethod
+    def detect(cls, line: str) -> bool:
+        """BankAccount cannot be reliably detected from a single line of text."""
+        return False

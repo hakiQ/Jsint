@@ -1,0 +1,251 @@
+"""
+Graph property serialization utilities.
+
+This module provides utilities for serializing complex Python objects
+into Neo4j-compatible primitive types, following the Single Responsibility Principle.
+"""
+
+from typing import Any, Callable, Dict, List, Optional, Type, Union
+
+from pydantic import BaseModel, ValidationError
+
+from jsint_core.utils import flatten, unflatten
+from jsint_types import JsintType
+
+from .types import GraphEdge, GraphNode, NodeMetadata
+
+# Callable that resolves a type name to a JsintType subclass (or None).
+TypeResolver = Callable[[str], Optional[Type[JsintType]]]
+
+
+class GraphSerializer:
+    """
+    Handles serialization of complex objects to Neo4j-compatible types.
+
+    This class is responsible for converting Pydantic models, nested objects,
+    and other complex types into primitive types that can be stored in Neo4j.
+    """
+
+    @staticmethod
+    def _clean_empty_values(data: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove empty string values from dict to avoid Pydantic validation errors."""
+        cleaned: Dict[str, Any] = {}
+        for key, value in data.items():
+            if value == "" or value is None:
+                continue
+            if isinstance(value, dict):
+                cleaned_nested = GraphSerializer._clean_empty_values(value)
+                if cleaned_nested:
+                    cleaned[key] = cleaned_nested
+            elif isinstance(value, list):
+                cleaned_list = [
+                    (
+                        GraphSerializer._clean_empty_values(item)
+                        if isinstance(item, dict)
+                        else item
+                    )
+                    for item in value
+                    if item != "" and item is not None
+                ]
+                if cleaned_list:
+                    cleaned[key] = cleaned_list
+            else:
+                cleaned[key] = value
+        return cleaned
+
+    @staticmethod
+    def flatten(dict: Dict[str, Any]) -> Dict[str, Any]:
+        return flatten(dict, remove_empty=False)
+
+    @staticmethod
+    def parse_jsint_type(
+        entity: Dict,
+        nodeType: str,
+        type_resolver: Optional[TypeResolver] = None,
+    ) -> JsintType:
+        if not type_resolver:
+            from jsint_core.core.services.type_registry_service import (
+                local_type_resolver,
+            )
+
+            type_resolver = local_type_resolver
+        DetectedType = type_resolver(nodeType)
+        if not DetectedType:
+            raise ValueError(f"Unknown type: {nodeType}")
+        properties = GraphSerializer._clean_empty_values(entity)
+        try:
+            return DetectedType(**properties)
+        except ValidationError as e:
+            # if fields fail let's still return the object with problematic fields filtered
+            invalid_fields = {err["loc"][0] for err in e.errors()}
+            cleaned_props = {
+                k: v for k, v in properties.items() if k not in invalid_fields
+            }
+            return DetectedType(**cleaned_props)
+
+    @staticmethod
+    def graph_node_to_jsint_type(node: GraphNode) -> JsintType:
+        return node.nodeProperties
+
+    @staticmethod
+    def neo4j_dict_to_graph_node(
+        node_dict: Dict[str, Any],
+        type_resolver: Optional[TypeResolver] = None,
+    ) -> GraphNode:
+        """Convert a flattened Neo4j node record to a GraphNode instance.
+
+        Unflattens the data, parses the nodeProperties into the appropriate
+        JsintType subclass, and constructs a complete GraphNode.
+        """
+        data = node_dict.get("data")
+        node_id = str(node_dict.get("id"))
+        if not data:
+            raise Exception("Could not find node data to extract.")
+        # unflatten object from neo4j
+        node_dict = unflatten(data)
+        node_type = node_dict.get(
+            "nodeType", node_dict.get("type", "")
+        )  # legacy support type
+        nodeLabel = str(node_dict.get("nodeLabel", node_dict.get("label", "")))
+        node_properties = node_dict.get("nodeProperties", {})
+        node_metadata = node_dict.get("nodeMetadata", {})
+
+        node_properties.pop(
+            "nodeLabel", None
+        )  # remove nodeLabel from original pydantic
+
+        entity = GraphSerializer.parse_jsint_type(
+            node_properties, node_type, type_resolver=type_resolver
+        )
+        return GraphNode(
+            id=node_id,
+            nodeLabel=nodeLabel,
+            nodeType=node_type,
+            nodeColor=node_dict.get("nodeColor"),
+            nodeSize=node_dict.get("nodeSize"),
+            nodeImage=node_dict.get("nodeImage"),
+            nodeIcon=node_dict.get("nodeIcon"),
+            nodeFlag=node_dict.get("nodeFlag"),
+            nodeShape=node_dict.get("nodeShape"),
+            x=node_dict.get("x"),
+            y=node_dict.get("y"),
+            nodeProperties=entity,
+            nodeMetadata=node_metadata,
+        )
+
+    @staticmethod
+    def jsint_type_to_neo4j_dict(entity: JsintType) -> Dict[str, Any]:
+        node_type = entity.__class__.__name__.lower()
+        node_label = entity.nodeLabel
+        node_shape = (
+            "square" if node_type in ["document", "image", "bankaccount"] else "circle"
+        )
+        graph_node = GraphNode(
+            id="",
+            nodeColor=None,
+            nodeIcon=None,
+            nodeImage=None,
+            nodeFlag=None,
+            nodeShape=node_shape,
+            nodeLabel=node_label or "",
+            nodeType=node_type,
+            nodeProperties=entity,
+            nodeMetadata=NodeMetadata(),
+        )
+        return GraphSerializer.graph_node_to_neo4j_dict(graph_node)
+
+    @staticmethod
+    def graph_node_to_neo4j_dict(node: GraphNode) -> Dict[str, Any]:
+        """Convert a GraphNode to a flattened Neo4j-compatible dict.
+
+        Serializes the model to JSON-compatible types and flattens nested
+        structures into dot-notation keys for Neo4j property storage.
+
+        nodeProperties uses exclude_unset: repository._build_node_query does
+        `SET n += $props`, so a full dump of a partial JsintType would
+        null out fields a prior enricher already set on the same node.
+        """
+        neo4j_dict = node.model_dump(
+            mode="json", serialize_as_any=True, exclude={"nodeProperties"}
+        )
+        node_properties = node.nodeProperties
+        neo4j_dict["nodeProperties"] = (
+            node_properties.model_dump(mode="json", exclude_unset=True)
+            if isinstance(node_properties, BaseModel)
+            else node_properties
+        )
+        neo4j_dict_flatten = flatten(neo4j_dict, remove_empty=False)
+        neo4j_dict_flatten.pop(
+            "nodeProperties.nodeLabel", None
+        )  # remove nodeLabel from original pydantic
+        return neo4j_dict_flatten
+
+    @staticmethod
+    def neo4j_dict_to_graph_edge(edge_dict: Dict[str, Any]) -> GraphEdge:
+        """Convert a Neo4j relationship record to a GraphEdge instance."""
+        return GraphEdge(
+            id=str(edge_dict.get("id")),
+            source=str(edge_dict.get("source")),
+            target=str(edge_dict.get("target")),
+            label=str(edge_dict.get("type")),
+        )
+
+    @staticmethod
+    def graph_edge_to_neo4j_dict(
+        from_obj: Union[JsintType, GraphNode],
+        to_obj: Union[JsintType, GraphNode],
+        label: str,
+    ) -> Dict[str, Any]:
+        """Build a Neo4j relationship dict for matching nodes by type and label.
+
+        Creates a relationship descriptor that identifies source and target nodes
+        by their nodeType and nodeLabel, allowing relationship creation without IDs.
+        """
+        from_type = (
+            from_obj.__class__.__name__.lower()
+            if isinstance(from_obj, JsintType)
+            else from_obj.nodeType
+        )
+        to_type = (
+            to_obj.__class__.__name__.lower()
+            if isinstance(to_obj, JsintType)
+            else to_obj.nodeType
+        )
+        return {
+            "from_type": from_type,
+            "from_label": from_obj.nodeLabel,
+            "to_type": to_type,
+            "to_label": to_obj.nodeLabel,
+            "rel_label": label,
+        }
+
+    @staticmethod
+    def deserialize_nodes(
+        node_dicts: List[Dict[str, Any]],
+        type_resolver: Optional[TypeResolver] = None,
+    ) -> List[GraphNode]:
+        """Convert a list of Neo4j node records to GraphNode instances."""
+        return [
+            GraphSerializer.neo4j_dict_to_graph_node(
+                node_dict, type_resolver=type_resolver
+            )
+            for node_dict in node_dicts
+        ]
+
+    @staticmethod
+    def serialize_nodes(nodes: List[GraphNode]) -> List[Dict[str, Any]]:
+        """Convert a list of Neo4j node records to GraphNode instances."""
+        return [GraphSerializer.graph_node_to_neo4j_dict(node) for node in nodes]
+
+    @staticmethod
+    def serialize_jsint_types(nodes: List[JsintType]) -> List[Dict[str, Any]]:
+        """Convert a list of Neo4j node records to GraphNode instances."""
+        return [GraphSerializer.jsint_type_to_neo4j_dict(node) for node in nodes]
+
+    @staticmethod
+    def deserialize_edges(edge_dicts: List[Dict[str, Any]]) -> List[GraphEdge]:
+        """Convert a list of Neo4j relationship records to GraphEdge instances."""
+        return [
+            GraphSerializer.neo4j_dict_to_graph_edge(edge_dict)
+            for edge_dict in edge_dicts
+        ]

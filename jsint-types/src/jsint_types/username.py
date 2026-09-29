@@ -1,0 +1,75 @@
+import re
+from typing import Optional, Self
+
+from pydantic import Field, field_validator, model_validator
+
+from .jsint_base import JsintType
+from .registry import jsint_type
+
+
+@jsint_type
+class Username(JsintType):
+    """Represents a username or handle on any platform."""
+
+    value: str = Field(
+        ...,
+        description="Username or handle string",
+        title="Username value",
+        json_schema_extra={"primary": True},
+    )
+    platform: Optional[str] = Field(
+        None, description="Platform name, e.g., 'twitter'", title="Username platform"
+    )
+    last_seen: Optional[str] = Field(
+        None, description="Last time this username was observed", title="Last seen at"
+    )
+
+    @field_validator("value")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        """Validate username format.
+
+        Username must be 3-80 characters long and contain only:
+        - Letters (a-z, A-Z)
+        - Numbers (0-9)
+        - Underscores (_)
+        - Hyphens (-)
+        """
+        if v.startswith("@"):
+            v = v[1:]
+        # if not re.match(r"^[a-zA-Z0-9_-]{3,80}$", v):
+        #     raise ValueError(
+        #         f"Invalid username: {v}. Must be 3-80 characters and contain only letters, numbers, underscores, and hyphens."
+        #     )
+        return v
+
+    @model_validator(mode="after")
+    def compute_label(self) -> Self:
+        self.nodeLabel = f"{self.value}"
+        return self
+
+    @classmethod
+    def from_string(cls, line: str):
+        """Parse a username from a raw string."""
+        return cls(value=line.strip())
+
+    @classmethod
+    def detect(cls, line: str) -> bool:
+        """Detect whether a line of text contains a username."""
+        line = line.strip()
+        if not line:
+            return False
+
+        # Support one leading '@' prefix, which is common for social handles.
+        raw = line[1:] if line.startswith("@") else line
+        if not raw:
+            return False
+
+        # Don't claim file hashes (MD5/SHA1/SHA256) — those are File entities.
+        # This keeps hash detection independent of type-registration order.
+        if len(raw) in (32, 40, 64) and re.fullmatch(r"[0-9a-fA-F]+", raw):
+            return False
+
+        # Username pattern: 3-80 characters, only letters, numbers, underscores, hyphens.
+        # This is intentionally restrictive to avoid false positives.
+        return bool(re.fullmatch(r"[a-zA-Z0-9_-]{3,80}", raw))

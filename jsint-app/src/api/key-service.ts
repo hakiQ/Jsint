@@ -1,0 +1,13 @@
+import { fetchWithAuth } from './api'
+
+export const keyService = {
+  get: () => fetchWithAuth(`/api/keys`, { method: 'GET' }),
+  getById: (key_id: string) => fetchWithAuth(`/api/keys/${key_id}`, { method: 'GET' }),
+  create: (data: { name: string; key: string }) =>
+    fetchWithAuth(`/api/keys/create`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+  chatKeyExists: () => fetchWithAuth(`/api/keys/chat-key-exists`, { method: 'GET' }),
+  deleteById: (key_id: string) => fetchWithAuth(`/api/keys/${key_id}`, { method: 'DELETE' })
+}

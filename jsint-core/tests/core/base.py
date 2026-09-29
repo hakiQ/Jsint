@@ -1,0 +1,72 @@
+from typing import List
+
+from jsint_core.core.enricher_base import Enricher
+from jsint_types import Phone
+from jsint_types.domain import Domain
+from jsint_types.ip import Ip
+
+
+class ResolveEnricher(Enricher):
+    InputType = List[Domain]
+    OutputType = List[Ip]
+
+    @classmethod
+    def name(cls) -> str:
+        return "domain_to_ip"
+
+    @classmethod
+    def category(cls) -> str:
+        return "Domain"
+
+    @classmethod
+    def key(cls) -> str:
+        return "domain"
+
+    async def scan(self, data: InputType) -> OutputType:
+        return []
+
+    def postprocess(self, results: OutputType, original_input: InputType) -> OutputType:
+        return []
+
+
+# Make types available at module level for easy access
+InputType = ResolveEnricher.InputType
+OutputType = ResolveEnricher.OutputType
+
+enricher = ResolveEnricher("sketch_123", "scan_123")
+
+
+def test_correct_preprocess():
+    inputs = [
+        Domain(domain="mydomain.com"),
+        {"domain": "blog.mydomain2.com"},
+        "mydomain3.com",
+        "notADomaiN",
+    ]
+    preprocessed = enricher.preprocess(inputs)
+    assert len(preprocessed) == 3  # 3 valid domains
+    assert preprocessed[0].domain == "mydomain.com"
+    assert preprocessed[0].label == "mydomain.com"
+    assert preprocessed[0].root is True
+
+    assert preprocessed[1].domain == "blog.mydomain2.com"
+    assert preprocessed[1].label == "blog.mydomain2.com"
+    assert preprocessed[1].root is False
+
+    assert preprocessed[2].domain == "mydomain3.com"
+    assert preprocessed[2].label == "mydomain3.com"
+    assert preprocessed[2].root is True
+
+
+def test_incorrect_preprocess():
+    inputs = [
+        Phone(number="+33634565423"),
+        {"name": "JohnDoe"},
+        "mydomain.com",
+        "notADomaiN",
+    ]
+    preprocessed = enricher.preprocess(inputs)
+    assert len(preprocessed) == 1  # 1 valid domain
+    assert preprocessed[0].domain == "mydomain.com"
+    assert preprocessed[0].root is True
+    assert preprocessed[0].label == "mydomain.com"

@@ -1,0 +1,449 @@
+from typing import List, Literal, Optional, Self, Union
+
+from pydantic import Field, field_validator, model_validator
+
+from .address import Location
+from .email import Email
+from .jsint_base import JsintType
+from .ip import Ip
+from .phone import Phone
+from .registry import jsint_type
+
+
+@jsint_type
+class Individual(JsintType):
+    """Represents an individual person with comprehensive personal information."""
+
+    # Basic Information
+    first_name: Optional[str] = Field(
+        None, description="First name of the individual", title="First Name"
+    )
+    last_name: Optional[str] = Field(
+        None, description="Last name of the individual", title="Last Name"
+    )
+    full_name: Optional[str] = Field(
+        None,
+        description="Full name of the individual",
+        title="Full Name",
+        json_schema_extra={"primary": True},
+    )
+    middle_name: Optional[str] = Field(
+        None, description="Middle name or initial", title="Middle Name"
+    )
+    maiden_name: Optional[str] = Field(
+        None, description="Maiden name (if applicable)", title="Maiden Name"
+    )
+    aliases: Optional[List[str]] = Field(
+        None, description="Known aliases or nicknames", title="Aliases"
+    )
+
+    # Birth Information
+    birth_date: Optional[str] = Field(
+        None, description="Date of birth", title="Date of Birth"
+    )
+    birth_place: Optional[Location] = Field(
+        None, description="Place of birth", title="Birth Place"
+    )
+    age: Optional[int] = Field(None, description="Current age", title="Age")
+
+    # Physical Characteristics
+    gender: Optional[Literal["male", "female", "other"]] = Field(
+        None, description="Gender of the individual", title="Gender"
+    )
+    height: Optional[str] = Field(
+        None, description="Height (e.g., '5ft 10in' or '178cm')", title="Height"
+    )
+    weight: Optional[str] = Field(
+        None, description="Weight (e.g., '170lbs' or '77kg')", title="Weight"
+    )
+    eye_color: Optional[
+        Literal["brown", "blue", "green", "hazel", "gray", "amber", "other"]
+    ] = Field(None, description="Eye color", title="Eye Color")
+    hair_color: Optional[
+        Literal["black", "brown", "blonde", "red", "gray", "white", "bald", "other"]
+    ] = Field(None, description="Hair color", title="Hair Color")
+    skin_tone: Optional[str] = Field(
+        None, description="Skin tone description", title="Skin Tone"
+    )
+    ethnicity: Optional[str] = Field(
+        None, description="Ethnicity or ethnic background", title="Ethnicity"
+    )
+    blood_type: Optional[Literal["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]] = (
+        Field(None, description="Blood type", title="Blood Type")
+    )
+    distinguishing_marks: Optional[List[str]] = Field(
+        None,
+        description="Distinguishing marks, scars, tattoos, etc.",
+        title="Distinguishing Marks",
+    )
+    disabilities: Optional[List[str]] = Field(
+        None,
+        description="Known disabilities or medical conditions",
+        title="Disabilities",
+    )
+
+    # Health and Lifestyle
+    is_smoker: Optional[bool] = Field(
+        None, description="Whether the individual smokes", title="Is Smoker"
+    )
+    is_deceased: Optional[bool] = Field(
+        None, description="Whether the individual is deceased", title="Is Deceased"
+    )
+    death_date: Optional[str] = Field(
+        None, description="Date of death (if applicable)", title="Death Date"
+    )
+    death_place: Optional[Location] = Field(
+        None, description="Place of death (if applicable)", title="Death Place"
+    )
+    cause_of_death: Optional[str] = Field(
+        None, description="Cause of death (if applicable)", title="Cause of Death"
+    )
+
+    # Contact Information
+    phone_numbers: Optional[List[Phone]] = Field(
+        None, description="Known phone numbers", title="Phone Numbers"
+    )
+    email_addresses: Optional[List[Email]] = Field(
+        None, description="Known email addresses", title="Email Addresses"
+    )
+    social_media_profiles: Optional[List[str]] = Field(
+        None,
+        description="Social media profile URLs or usernames",
+        title="Social Media Profiles",
+    )
+
+    # Location Information
+    current_address: Optional[Location] = Field(
+        None, description="Current residential address", title="Current Address"
+    )
+    previous_addresses: Optional[List[Location]] = Field(
+        None, description="Previous known addresses", title="Previous Addresses"
+    )
+    nationality: Optional[str] = Field(
+        None, description="Nationality or country of citizenship", title="Nationality"
+    )
+    citizenship: Optional[List[str]] = Field(
+        None,
+        description="Countries of citizenship (dual citizenship possible)",
+        title="Citizenship",
+    )
+    place_of_residence: Optional[str] = Field(
+        None,
+        description="Current place of residence (city/state/country)",
+        title="Place of Residence",
+    )
+
+    # Identification Documents
+    passport_number: Optional[str] = Field(
+        None, description="Passport number", title="Passport Number"
+    )
+    drivers_license: Optional[str] = Field(
+        None, description="Driver's license number", title="Driver's License"
+    )
+    social_security_number: Optional[str] = Field(
+        None, description="Social Security Number (SSN)", title="Social Security Number"
+    )
+    national_id: Optional[str] = Field(
+        None, description="National ID number", title="National ID"
+    )
+    voter_id: Optional[str] = Field(
+        None, description="Voter ID number", title="Voter ID"
+    )
+    tax_id: Optional[str] = Field(
+        None, description="Tax identification number", title="Tax ID"
+    )
+
+    # Personal Relationships
+    marital_status: Optional[
+        Literal[
+            "single",
+            "married",
+            "divorced",
+            "widowed",
+            "separated",
+            "domestic_partnership",
+        ]
+    ] = Field(None, description="Marital status", title="Marital Status")
+    spouse_name: Optional[str] = Field(
+        None, description="Name of spouse or partner", title="Spouse Name"
+    )
+    children_count: Optional[int] = Field(
+        None, description="Number of children", title="Children Count"
+    )
+    children_names: Optional[List[str]] = Field(
+        None, description="Names of children", title="Children Names"
+    )
+    parents_names: Optional[List[str]] = Field(
+        None, description="Names of parents", title="Parents Names"
+    )
+    emergency_contact: Optional[str] = Field(
+        None, description="Emergency contact information", title="Emergency Contact"
+    )
+
+    # Professional Information
+    occupation: Optional[str] = Field(
+        None, description="Current occupation or job title", title="Occupation"
+    )
+    employer: Optional[str] = Field(
+        None, description="Current employer", title="Employer"
+    )
+    employer_address: Optional[Location] = Field(
+        None, description="Employer's address", title="Employer Address"
+    )
+    job_title: Optional[str] = Field(
+        None, description="Current job title or position", title="Job Title"
+    )
+    annual_income: Optional[float] = Field(
+        None, description="Annual income", title="Annual Income"
+    )
+    employment_history: Optional[List[str]] = Field(
+        None, description="Previous employment history", title="Employment History"
+    )
+
+    # Education
+    education_level: Optional[
+        Literal["elementary", "high_school", "bachelor", "master", "doctorate", "other"]
+    ] = Field(
+        None, description="Highest education level achieved", title="Education Level"
+    )
+    schools_attended: Optional[List[str]] = Field(
+        None, description="Schools or universities attended", title="Schools Attended"
+    )
+    degrees: Optional[List[str]] = Field(
+        None, description="Degrees or certifications obtained", title="Degrees"
+    )
+
+    # Personal Characteristics
+    languages_spoken: Optional[List[str]] = Field(
+        None, description="Languages spoken", title="Languages Spoken"
+    )
+    religion: Optional[str] = Field(
+        None, description="Religious affiliation", title="Religion"
+    )
+    political_affiliation: Optional[str] = Field(
+        None, description="Political party affiliation", title="Political Affiliation"
+    )
+    hobbies: Optional[List[str]] = Field(
+        None, description="Known hobbies or interests", title="Hobbies"
+    )
+    personality_traits: Optional[List[str]] = Field(
+        None, description="Known personality traits", title="Personality Traits"
+    )
+
+    # Biometric Information
+    fingerprints: Optional[str] = Field(
+        None, description="Fingerprint data or hash", title="Fingerprints"
+    )
+    dna_profile: Optional[str] = Field(
+        None, description="DNA profile or hash", title="DNA Profile"
+    )
+    facial_recognition_id: Optional[str] = Field(
+        None, description="Facial recognition system ID", title="Facial Recognition ID"
+    )
+    iris_scan: Optional[str] = Field(
+        None, description="Iris scan data or hash", title="Iris Scan"
+    )
+    voice_print: Optional[str] = Field(
+        None, description="Voice print data or hash", title="Voice Print"
+    )
+
+    # Financial Information
+    bank_accounts: Optional[List[str]] = Field(
+        None, description="Known bank account numbers", title="Bank Accounts"
+    )
+    credit_score: Optional[int] = Field(
+        None, description="Credit score", title="Credit Score"
+    )
+    net_worth: Optional[float] = Field(
+        None, description="Estimated net worth", title="Net Worth"
+    )
+    assets: Optional[List[str]] = Field(
+        None, description="Known assets (property, vehicles, etc.)", title="Assets"
+    )
+
+    # Legal Information
+    criminal_record: Optional[bool] = Field(
+        None,
+        description="Whether individual has a criminal record",
+        title="Criminal Record",
+    )
+    arrest_history: Optional[List[str]] = Field(
+        None, description="Known arrests or charges", title="Arrest History"
+    )
+    convictions: Optional[List[str]] = Field(
+        None, description="Criminal convictions", title="Convictions"
+    )
+    civil_cases: Optional[List[str]] = Field(
+        None, description="Civil court cases", title="Civil Cases"
+    )
+    security_clearance: Optional[str] = Field(
+        None, description="Security clearance level", title="Security Clearance"
+    )
+
+    # Digital Footprint
+    ip_addresses: Optional[List[Ip]] = Field(
+        None, description="Known IP addresses", title="IP Addresses"
+    )
+    usernames: Optional[List[str]] = Field(
+        None, description="Known online usernames", title="Usernames"
+    )
+    device_ids: Optional[List[str]] = Field(
+        None, description="Known device identifiers", title="Device IDs"
+    )
+
+    # Metadata
+    first_seen: Optional[str] = Field(
+        None,
+        description="First time individual was observed in system",
+        title="First Seen",
+    )
+    last_seen: Optional[str] = Field(
+        None,
+        description="Last time individual was observed in system",
+        title="Last Seen",
+    )
+    source: Optional[str] = Field(
+        None, description="Source of individual information", title="Source"
+    )
+    confidence: Optional[float] = Field(
+        None, description="Confidence score for individual data", title="Confidence"
+    )
+    notes: Optional[str] = Field(
+        None, description="Additional notes or observations", title="Notes"
+    )
+    src: Optional[str] = Field(
+        None, description="URL to profile picture", title="Profile Picture URL"
+    )
+    last_updated: Optional[str] = Field(
+        None, description="Last update timestamp", title="Last Updated"
+    )
+
+    @field_validator("email_addresses", mode="before")
+    @classmethod
+    def validate_email_addresses(
+        cls, v: Optional[List[Union[str, Email]]]
+    ) -> Optional[List[Email]]:
+        """Validate that all email addresses in the list are valid and convert to Email objects."""
+        if v is None:
+            return None
+
+        validated_emails = []
+        for email in v:
+            if not email:
+                continue
+            try:
+                # If already an Email object, keep it
+                if isinstance(email, Email):
+                    validated_emails.append(email)
+                # If string, convert to Email (will validate automatically)
+                elif isinstance(email, str):
+                    validated_emails.append(Email(email=email))
+                # If dict, convert to Email
+                elif isinstance(email, dict):
+                    validated_emails.append(Email(**email))
+            except Exception:
+                # Skip invalid emails
+                continue
+
+        return validated_emails if validated_emails else None
+
+    @field_validator("phone_numbers", mode="before")
+    @classmethod
+    def validate_phone_numbers(
+        cls, v: Optional[List[Union[str, Phone]]]
+    ) -> Optional[List[Phone]]:
+        """Validate phone numbers in the list and convert to Phone objects."""
+        if v is None:
+            return None
+        validated_phones = []
+        for phone in v:
+            if not phone:
+                continue
+            try:
+                # If already a Phone object, keep it
+                if isinstance(phone, Phone):
+                    validated_phones.append(phone)
+                # If string, convert to Phone (will validate and normalize automatically)
+                elif isinstance(phone, str):
+                    validated_phones.append(Phone(number=phone))
+                # If dict, convert to Phone
+                elif isinstance(phone, dict):
+                    validated_phones.append(Phone(**phone))
+            except Exception:
+                # Skip invalid phone numbers
+                continue
+        return validated_phones if validated_phones else None
+
+    @field_validator("ip_addresses", mode="before")
+    @classmethod
+    def validate_ip_addresses(
+        cls, v: Optional[List[Union[str, Ip]]]
+    ) -> Optional[List[Ip]]:
+        """Validate that all IP addresses in the list are valid and convert to Ip objects."""
+        if v is None:
+            return None
+        validated_ips = []
+        for ip in v:
+            if not ip:
+                continue
+            try:
+                # If already an Ip object, keep it
+                if isinstance(ip, Ip):
+                    validated_ips.append(ip)
+                # If string, convert to Ip (will validate automatically)
+                elif isinstance(ip, str):
+                    validated_ips.append(Ip(address=ip))
+                # If dict, convert to Ip
+                elif isinstance(ip, dict):
+                    validated_ips.append(Ip(**ip))
+            except Exception:
+                # Skip invalid IPs
+                continue
+
+        return validated_ips if validated_ips else None
+
+    @model_validator(mode="after")
+    def compute_label(self) -> Self:
+        # Use full_name if available, otherwise concatenate first and last name
+        if self.full_name:
+            self.nodeLabel = self.full_name
+        elif self.first_name and self.last_name:
+            self.nodeLabel = f"{self.first_name} {self.last_name}"
+        elif self.first_name:
+            self.nodeLabel = self.first_name
+        elif self.last_name:
+            self.nodeLabel = self.last_name
+        self.full_name = self.nodeLabel
+        return self
+
+    @classmethod
+    def from_string(cls, line: str):
+        """Parse an individual from a raw string (full name).
+
+        Splits the string on space to extract first_name and last_name.
+        Example: "John Doe" -> first_name="John", last_name="Doe"
+        """
+        line = line.strip()
+        parts = line.split(maxsplit=1)
+
+        if len(parts) == 1:
+            # Only one name provided, use it as first_name
+            return cls(first_name=parts[0], last_name="")
+        elif len(parts) >= 2:
+            # At least two parts, first is first_name, rest is last_name
+            return cls(first_name=parts[0], last_name=parts[1])
+        else:
+            # Empty string
+            return cls(first_name="", last_name="")
+
+    @classmethod
+    def detect(cls, line: str) -> bool:
+        """We can detect an individual only if we can split value in exactly 2 string"""
+        line = line.strip()
+        if not line:
+            return False
+        fullname = line.split(" ")
+        if 2 <= len(fullname) <= 3:
+            return True
+
+        return False

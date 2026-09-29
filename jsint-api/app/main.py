@@ -1,0 +1,67 @@
+import os
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+# Routes to be included
+from app.api.routes import (
+    admin,
+    analysis,
+    auth,
+    chat,
+    custom_types,
+    docs,
+    enrichers,
+    events,
+    flows,
+    investigations,
+    keys,
+    scan,
+    sketches,
+    types,
+)
+
+# Comma-separated list of allowed origins, e.g. "https://app.example.com,https://staging.example.com"
+# Falls back to localhost dev origin when unset. Never use "*" with allow_credentials=True.
+origins = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+    if o.strip()
+]
+
+
+app = FastAPI(ignore_trailing_slash=True, redirect_slashes=False)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint for Docker healthcheck"""
+    return {"status": "ok"}
+
+
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+app.include_router(sketches.router, prefix="/api/sketches", tags=["sketches"])
+app.include_router(
+    investigations.router, prefix="/api/investigations", tags=["investigations"]
+)
+app.include_router(enrichers.router, prefix="/api/enrichers", tags=["enrichers"])
+app.include_router(docs.router, prefix="/api/docs", tags=["docs"])
+app.include_router(flows.router, prefix="/api/flows", tags=["flows"])
+app.include_router(events.router, prefix="/api/events", tags=["events"])
+app.include_router(analysis.router, prefix="/api/analyses", tags=["analyses"])
+app.include_router(chat.router, prefix="/api/chats", tags=["chats"])
+app.include_router(scan.router, prefix="/api/scans", tags=["scans"])
+app.include_router(keys.router, prefix="/api/keys", tags=["keys"])
+app.include_router(types.router, prefix="/api/types", tags=["types"])
+app.include_router(
+    custom_types.router, prefix="/api/custom-types", tags=["custom-types"]
+)

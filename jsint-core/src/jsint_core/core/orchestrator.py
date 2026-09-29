@@ -1,0 +1,527 @@
+import asyncio
+import json
+import os
+import time
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
+
+from pydantic import ValidationError
+
+from jsint_enrichers import ENRICHER_REGISTRY
+
+from ..utils import to_json_serializable
+from .enricher_base import Enricher
+from .logger import Logger
+from .types import FlowBranch, FlowStep
+from .vault import VaultProtocol
+
+
+class FlowOrchestrator(Enricher):
+    """
+    Orchestrator for running a list of enrichers.
+    """
+
+    def __init__(
+        self,
+        sketch_id: str,
+        scan_id: str,
+        enricher_branches: List[FlowBranch],
+        vault: Optional[VaultProtocol] = None,
+    ):
+        super().__init__(sketch_id, scan_id, vault=vault)
+        self.enricher_branches = enricher_branches
+        self.enrichers: Dict[str, Enricher] = {}  # Map of nodeId -> enricher instance
+        self.execution_log_file: Optional[str] = None  # Path to the execution log file
+        self._create_execution_log()
+        self._load_enrichers()
+
+    def _create_execution_log(self) -> None:
+        """
+        Create the initial execution log JSON file with enricher configuration.
+        """
+        try:
+            # Create a directory for storing enricher files if it doesn't exist
+            enricher_dir = "enricher_logs"
+            os.makedirs(enricher_dir, exist_ok=True)
+
+            # Create filename with sketch_id and scan_id
+            filename = f"enricher_execution_{self.sketch_id}_{self.scan_id}.json"
+            log_file = os.path.join(enricher_dir, filename)
+            self.execution_log_file = log_file
+
+            # Serialize the enricher branches
+            serialized_branches = to_json_serializable(self.enricher_branches)
+
+            # Create initial log structure
+            initial_log = {
+                "sketch_id": self.sketch_id,
+                "scan_id": self.scan_id,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "status": "initialized",
+                "enricher_branches": serialized_branches,
+                "execution_log": [],
+                "summary": {
+                    "total_steps": 0,
+                    "completed_steps": 0,
+                    "failed_steps": 0,
+                    "total_execution_time_ms": 0,
+                },
+                "final_results": {},
+            }
+
+            # Count total steps
+            total_steps = 0
+            for branch in self.enricher_branches:
+                for step in branch.steps:
+                    if step.type != "type":
+                        total_steps += 1
+            initial_log["summary"]["total_steps"] = total_steps
+
+            # Save initial log file
+            with open(log_file, "w", encoding="utf-8") as f:
+                json.dump(initial_log, f, indent=2, ensure_ascii=False)
+
+            Logger.info(
+                self.sketch_id,
+                {
+                    "message": f"Enricher execution log created at {self.execution_log_file}"
+                },
+            )
+
+        except Exception as e:
+            Logger.error(
+                self.sketch_id, {"message": f"Failed to create execution log: {str(e)}"}
+            )
+            self.execution_log_file = None
+
+    def _update_execution_log(
+        self, step_entry: Optional[Dict[str, Any]] = None, status: Optional[str] = None
+    ) -> None:
+        """
+        Update the execution log file with a new step entry or status update.
+        """
+        if not self.execution_log_file:
+            return
+
+        try:
+            # Read current log
+            with open(self.execution_log_file, "r", encoding="utf-8") as f:
+                log_data = json.load(f)
+
+            # Update timestamp
+            log_data["updated_at"] = datetime.now().isoformat()
+
+            # Update status if provided
+            if status:
+                log_data["status"] = status
+
+            # Add step entry if provided
+            if step_entry:
+                log_data["execution_log"].append(step_entry)
+
+                # Update summary
+                if step_entry["status"] == "completed":
+                    log_data["summary"]["completed_steps"] += 1
+                elif step_entry["status"] == "error":
+                    log_data["summary"]["failed_steps"] += 1
+
+                if "execution_time_ms" in step_entry:
+                    log_data["summary"]["total_execution_time_ms"] += step_entry[
+                        "execution_time_ms"
+                    ]
+
+            # Write updated log
+            with open(self.execution_log_file, "w", encoding="utf-8") as f:
+                json.dump(log_data, f, indent=2, ensure_ascii=False)
+
+        except Exception as e:
+            Logger.error(
+                self.sketch_id, {"message": f"Failed to update execution log: {str(e)}"}
+            )
+
+    def _finalize_execution_log(self, final_results: Dict[str, Any]) -> None:
+        """
+        Finalize the execution log with final results and status.
+        """
+        if not self.execution_log_file:
+            return
+
+        try:
+            # Read current log
+            with open(self.execution_log_file, "r", encoding="utf-8") as f:
+                log_data = json.load(f)
+
+            # Update final data
+            log_data["updated_at"] = datetime.now().isoformat()
+            log_data["status"] = "completed"
+            log_data["final_results"] = to_json_serializable(final_results)
+
+            # Write final log
+            with open(self.execution_log_file, "w", encoding="utf-8") as f:
+                json.dump(log_data, f, indent=2, ensure_ascii=False)
+
+            Logger.info(
+                self.sketch_id,
+                {
+                    "message": f"Enricher execution log finalized at {self.execution_log_file}"
+                },
+            )
+
+        except Exception as e:
+            Logger.error(
+                self.sketch_id,
+                {"message": f"Failed to finalize execution log: {str(e)}"},
+            )
+
+    def _save_enricher_branches(self) -> None:
+        """
+        Save the enricher branches to a JSON file for debugging and persistence.
+        """
+        try:
+            # Create a directory for storing enricher files if it doesn't exist
+            enricher_dir = "enricher_logs"
+            os.makedirs(enricher_dir, exist_ok=True)
+
+            # Create filename with sketch_id and scan_id
+            filename = f"enricher_branches_{self.sketch_id}_{self.scan_id}.json"
+            filepath = os.path.join(enricher_dir, filename)
+
+            # Serialize the enricher branches
+            serialized_branches = to_json_serializable(self.enricher_branches)
+
+            # Save to JSON file
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "sketch_id": self.sketch_id,
+                        "scan_id": self.scan_id,
+                        "timestamp": datetime.now().isoformat(),
+                        "enricher_branches": serialized_branches,
+                    },
+                    f,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+
+            Logger.info(
+                self.sketch_id, {"message": f"Enricher branches saved to {filepath}"}
+            )
+
+        except Exception as e:
+            Logger.error(
+                self.sketch_id,
+                {"message": f"Failed to save enricher branches: {str(e)}"},
+            )
+
+    def _load_enrichers(self) -> None:
+        if not self.enricher_branches:
+            raise ValueError("No enricher branches provided")
+
+        # Collect all enricher nodes across all branches
+        enricher_nodes = []
+        for branch in self.enricher_branches:
+            for step in branch.steps:
+                if step.type == "type":
+                    continue
+                enricher_nodes.append(step)
+
+        if not enricher_nodes:
+            raise ValueError("No enricher nodes found in enricher branches")
+
+        # Create enricher instances for each node
+        for node in enricher_nodes:
+            node_id = node.nodeId
+
+            # Extract enricher name from nodeId (assuming format like "enricher_name-1234567890")
+            enricher_name = node_id.split("-")[0]
+
+            if not ENRICHER_REGISTRY.enricher_exists(enricher_name):
+                raise ValueError(f"Enricher '{enricher_name}' not found in registry")
+
+            # Pass the step params to the enricher instance
+            enricher_params = (
+                node.params if hasattr(node, "params") and node.params else {}
+            )
+            enricher = ENRICHER_REGISTRY.get_enricher(
+                enricher_name,
+                self.sketch_id,
+                self.scan_id,
+                vault=self.vault,
+                params=enricher_params,
+            )
+            self.enrichers[node_id] = enricher
+
+    def resolve_reference(self, ref_value: str, results_mapping: Dict[str, Any]) -> Any:
+        """
+        Resolve a reference value from the results mapping.
+        References could be just the key name like "transformed_domain".
+        """
+        if ref_value in results_mapping:
+            return results_mapping[ref_value]
+        return None
+
+    # No callers anywhere in the codebase — dead code. Its two return
+    # statements disagree (a dict in the no-inputs-resolved branch, a single
+    # resolved value via the last loop-iteration's input_key otherwise),
+    # which List[Any] never matched; typed Any here rather than guessing at
+    # the intended behavior of code nothing exercises.
+    def prepare_enricher_inputs(
+        self, step: FlowStep, results_mapping: Dict[str, Any], initial_values: List[str]
+    ) -> Any:
+        """
+        Prepare the inputs for an enricher based on the references and previous results.
+        Handles single references, lists, and direct values.
+        """
+        inputs = {}
+
+        for input_key, input_ref in step.inputs.items():
+            # Cas 1 : une seule référence (string)
+            if isinstance(input_ref, str):
+                resolved = self.resolve_reference(input_ref, results_mapping)
+                if resolved is not None:
+                    inputs[input_key] = resolved
+
+            # Cas 2 : liste de références ou valeurs
+            elif isinstance(input_ref, list):
+                resolved_items = []
+                for item in input_ref:
+                    if isinstance(item, str) and item in results_mapping:
+                        resolved_items.append(results_mapping[item])
+                    else:
+                        resolved_items.append(item)  # valeur directe
+                inputs[input_key] = resolved_items
+
+            else:
+                # Cas inattendu (valeur directe ?)
+                inputs[input_key] = input_ref
+
+        # Si aucun input n'a été résolu, utiliser les valeurs initiales
+        if not inputs:
+            enricher = self.enrichers.get(step.nodeId)
+            if enricher:
+                primary_key = enricher.key()
+                return {primary_key: initial_values}
+        else:
+            enricher = self.enrichers.get(step.nodeId)
+        return inputs[input_key]
+
+    def update_results_mapping(
+        self,
+        # Callers only ever pass enricher.execute()'s result through, which
+        # is validated as dict-or-list upstream — the body below only makes
+        # sense for the dict case (list membership/indexing by a string key
+        # would raise), a pre-existing gap not fixed here since it changes
+        # runtime behavior for enrichers whose outputs are list-shaped.
+        outputs: Union[Dict[str, Any], List[Any]],
+        step_outputs: Dict[str, str],
+        results_mapping: Dict[str, Any],
+    ) -> None:
+        """
+        Update the results mapping with new outputs from an enricher.
+        """
+        for output_key, output_ref in step_outputs.items():
+            if output_key in outputs:
+                results_mapping[output_ref] = outputs[output_key]  # type: ignore[index,call-overload]
+
+    @classmethod
+    def name(cls) -> str:
+        return "enricher_orchestrator"
+
+    @classmethod
+    def category(cls) -> str:
+        return "composite"
+
+    @classmethod
+    def key(cls) -> str:
+        return "values"
+
+    @classmethod
+    def input_schema(cls) -> Dict[str, str]:
+        return {"values": "array<string>"}
+
+    @classmethod
+    def output_schema(cls) -> Dict[str, str]:
+        return {"branches": "array", "results": "dict"}
+
+    # Deliberately not Liskov-compatible with Enricher.scan (async, returns
+    # List[Dict[str, Any]]): the orchestrator returns one aggregate result
+    # for the whole flow run, not a per-item list, and this sync entry point
+    # exists for callers outside the async enricher-execution path. Not
+    # changing the signature here — that's a behavioral call about how
+    # FlowOrchestrator is actually invoked, not a typing fix.
+    def scan(self, values: List[str]) -> Dict[str, Any]:  # type: ignore[override]
+        """
+        Synchronous implementation of scan that runs the async version in an event loop
+        """
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            results = loop.run_until_complete(self._async_scan(values))
+            return results
+        finally:
+            loop.close()
+
+    async def _async_scan(self, values: List[str]) -> Dict[str, Any]:
+        """
+        The actual async implementation of the scan logic
+        """
+        # Update execution log to indicate scan has started
+        self._update_execution_log(None, "running")
+
+        results: Dict[str, Any] = {
+            "initial_values": values,
+            "branches": [],
+            "results": {},
+        }
+        Logger.pending(self.sketch_id, {"message": "Starting enricher..."})
+
+        # Global mapping of output references to actual values
+        results_mapping: Dict[str, Any] = {}
+        # Cache for enricher results to avoid recomputation
+        enricher_results_cache: Dict[str, Any] = {}
+
+        sum(len(branch.steps) for branch in self.enricher_branches)
+        completed_steps = 0
+
+        # Process each branch
+        for branch in self.enricher_branches:
+            branch_id = branch.id
+            branch_name = branch.name
+            branch_results: Dict[str, Any] = {
+                "id": branch_id,
+                "name": branch_name,
+                "steps": [],
+            }
+
+            # Process each step in the branch
+            enricher_inputs = values
+            for step in branch.steps:
+                if step.type == "type":
+                    continue
+
+                node_id = step.nodeId
+                enricher = self.enrichers.get(node_id)
+
+                if not enricher:
+                    Logger.error(
+                        self.sketch_id,
+                        {"message": f"Enricher not found for node {node_id}"},
+                    )
+                    continue
+
+                enricher_name = enricher.name()
+                step_start_time = time.time()
+
+                step_result: Dict[str, Any] = {
+                    "nodeId": node_id,
+                    "enricher": enricher_name,
+                    "status": "error",  # Default to error, will update on success
+                }
+
+                # Create execution log entry
+                log_entry: Dict[str, Any] = {
+                    "step_id": f"{branch_id}_{node_id}",
+                    "branch_id": branch_id,
+                    "branch_name": branch_name,
+                    "node_id": node_id,
+                    "enricher_name": enricher_name,
+                    "inputs": to_json_serializable(enricher_inputs),
+                    "outputs": None,
+                    "status": "running",
+                    "error": None,
+                    "timestamp": datetime.now().isoformat(),
+                    "execution_time_ms": 0,
+                }
+
+                try:
+                    # Update status for current step
+                    completed_steps += 1
+                    if not enricher_inputs:
+                        error_msg = "No inputs available"
+                        step_result["error"] = error_msg
+                        log_entry["status"] = "error"
+                        log_entry["error"] = error_msg
+                        log_entry["execution_time_ms"] = int(
+                            (time.time() - step_start_time) * 1000
+                        )
+                        self._update_execution_log(log_entry)
+                        branch_results["steps"].append(step_result)
+                        continue
+
+                    # Check if we already have results for this enricher with these inputs
+                    cache_key = f"{node_id}:{str(enricher_inputs)}"
+                    if cache_key in enricher_results_cache:
+                        outputs = enricher_results_cache[cache_key]
+                        log_entry["cache_hit"] = True
+                    else:
+                        # Execute the enricher
+                        outputs = await enricher.execute(enricher_inputs)
+                        if not isinstance(outputs, (dict, list)):
+                            raise ValueError(
+                                f"Enricher '{enricher_name}' returned unsupported output format"
+                            )
+                        # Cache the results
+                        enricher_results_cache[cache_key] = outputs
+                        log_entry["cache_hit"] = False
+
+                    # Store the outputs in the step result (serialize to avoid JSON issues)
+                    step_result["outputs"] = to_json_serializable(outputs)
+                    step_result["status"] = "completed"
+
+                    # Update log entry with success
+                    log_entry["outputs"] = to_json_serializable(outputs)
+                    log_entry["status"] = "completed"
+                    log_entry["execution_time_ms"] = int(
+                        (time.time() - step_start_time) * 1000
+                    )
+
+                    # Update the global results mapping with the outputs
+                    self.update_results_mapping(outputs, step.outputs, results_mapping)
+                    # Also store the raw outputs in the main results
+                    results["results"][node_id] = outputs
+                    enricher_inputs = outputs
+
+                except ValidationError as e:
+                    error_msg = f"Validation error: {str(e)}"
+                    Logger.error(self.sketch_id, {"message": error_msg})
+                    step_result["error"] = error_msg
+                    log_entry["status"] = "error"
+                    log_entry["error"] = error_msg
+                    log_entry["execution_time_ms"] = int(
+                        (time.time() - step_start_time) * 1000
+                    )
+                    results["results"][node_id] = {"error": error_msg}
+                    self._update_execution_log(log_entry)
+                    return results
+
+                except Exception as e:
+                    error_msg = f"Error during scan: {str(e)}"
+                    Logger.error(self.sketch_id, {"message": error_msg})
+                    step_result["error"] = error_msg
+                    log_entry["status"] = "error"
+                    log_entry["error"] = error_msg
+                    log_entry["execution_time_ms"] = int(
+                        (time.time() - step_start_time) * 1000
+                    )
+                    results["results"][node_id] = {"error": error_msg}
+                    self._update_execution_log(log_entry)
+                    return results
+
+                # Update execution log with this step
+                self._update_execution_log(log_entry)
+                branch_results["steps"].append(step_result)
+
+            results["branches"].append(branch_results)
+
+        Logger.completed(
+            self.sketch_id, {"message": "Enricher completed successfully."}
+        )
+
+        # Include the final reference mapping for debugging
+        results["reference_mapping"] = results_mapping
+
+        # Finalize execution log
+        self._finalize_execution_log(results)
+
+        return results
